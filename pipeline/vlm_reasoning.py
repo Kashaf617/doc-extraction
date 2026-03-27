@@ -1,45 +1,40 @@
+import os
+import sys
+import time
+import logging
 import re
 import json
-import torch
-import logging
-import time
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from typing import Tuple, List, Optional
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Tuple
 
+# Import configurations
 try:
-    from document_ai_system.config import MODEL_QWEN, DEVICE, USE_FP16, LLM_MAX_NEW_TOKENS, LLM_TEMPERATURE
+    from document_ai_system.config import DEVICE
 except ImportError:
-    MODEL_QWEN = "Qwen/Qwen2.5-0.5B-Instruct"
     DEVICE = "cpu"
-    USE_FP16 = False
-    LLM_MAX_NEW_TOKENS = 300
-    LLM_TEMPERATURE = 0.0
+
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Standardized logging
-logger = logging.getLogger("DocumentAI.Reasoner")
+logger = logging.getLogger("DocumentAI.VLM")
 
-_tokenizer = None
-_model = None
+_MODEL = None
+_TOKENIZER = None
 
-def load_qwen_model() -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
-    """
-    Loads and returns the Qwen model and tokenizer (Singleton).
-    """
-    global _tokenizer, _model
-    if _model is None:
-        logger.info(f"Loading Reasoner Model: {MODEL_QWEN}...")
-        try:
-            _tokenizer = AutoTokenizer.from_pretrained(MODEL_QWEN, local_files_only=True)
-            _model = AutoModelForCausalLM.from_pretrained(
-                MODEL_QWEN,
-                torch_dtype=torch.float16 if USE_FP16 else torch.float32,
-                device_map=DEVICE,
-                local_files_only=True
-            )
-        except Exception as e:
-            logger.error(f"Failed to load reasoner: {e}")
-            raise RuntimeError("Reasoner Initialization Failure") from e
-    return _tokenizer, _model
+def load_qwen_model():
+    """Lazy loader for the 0.5B model."""
+    global _MODEL, _TOKENIZER
+    if _MODEL is None:
+        model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+        logger.info(f"Loading local VLM: {model_name} on {DEVICE}")
+        _TOKENIZER = AutoTokenizer.from_pretrained(model_name)
+        _MODEL = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype="auto",
+            device_map=DEVICE
+        )
+    return _TOKENIZER, _MODEL
 
 def reason_expiry_date(
     document_type: str,
@@ -56,6 +51,20 @@ def reason_expiry_date(
             "You are a Senior Document AI.\n"
             "Identify the Final Type and Expiry Date from the text.\n"
             "RULES:\n"
+            "1. TYPE: [passport, id_card, driving_license, cnic, bill]\n"
+            "2. DATE: Look for 'VALIDITY' or 'UNTIL'. Skip 'Issue' and 'Birth'.\n"
+            "3. FORMAT: YOU MUST OUTPUT ONLY A JSON OBJECT: {\"type\": \"...\", \"date\": \"YYYY-MM-DD\"}"
+        )
+
+        cand_str = ", ".join(candidate_dates) if candidate_dates else "None"
+        snippet_clean = str(relevant_text_snippet)[:1200]
+        user_prompt = f"Heuristic: {document_type}\nCandidates: {cand_str}\nText: {snippet_clean}\nOutput JSON:"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         model_inputs = tokenizer([text], return_tensors="pt").to(DEVICE)
 
@@ -76,7 +85,10 @@ def reason_expiry_date(
                 v_date = data.get("date", "NULL")
         except:
             # Fallback regex if JSON fails
-            if "driving" in full_response.lower() or "licence" in full_response.lower(): v_type = "driving_license"
+            low_res = full_response.lower()
+            if "driving" in low_res or "licence" in low_res: v_type = "driving_license"
+            elif "passport" in low_res: v_type = "passport"
+            
             date_match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', full_response)
             if date_match: v_date = date_match.group()
             
