@@ -1,0 +1,12 @@
+torch
+torchvision
+torchaudio
+transformers
+easyocr
+opencv-python
+pillow
+numpy
+scikit-learn
+regex
+flask
+flask-cors
