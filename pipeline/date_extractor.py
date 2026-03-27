@@ -25,7 +25,7 @@ DATE_PATTERNS = [
 # Ultimate Consolidated Weighted Keyword Map
 WEIGHTED_KEYWORDS: Dict[str, Any] = {
     "passport": {
-        "passport": 1000, "p<": 1000, "travel document": 500
+        "passport": 1000, "republic": 10
     },
     "id_card": {
         "id-card": 1000, "identity card": 1000, "občiansky": 1000, "national id": 500, "citizen": 500

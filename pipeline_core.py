@@ -77,25 +77,24 @@ def process_document(image_path: str) -> Dict[str, Any]:
         h_confidence = scoring.get("confidence", 0.0)
         timers['heuristics'] = time.time() - s
         
-        # Step 5: "Zero-LLM" Fast Path
-        # If Heuristic and Temporal reasoning agree, skip LLM entirely
+        # Step 5: "Zero-LLM" Fast Path (Heuristic Only)
         if h_confidence >= 1.0 and temporal_best:
             logger.info(f"Zero-LLM Fast Path selected: {temporal_best}")
             final_date_str = temporal_best
             final_confidence = 0.99
             method = "fast-path-heuristic"
         else:
-            # Step 6: Targeted LLM Judgment (Only if ambiguous)
+            # Step 6: Targeted LLM Judgment (Type + Date verification)
             s = time.time()
-            logger.info(f"Fallback to AI Reasoning (Heuristic Ambiguity).")
-            llm_date, llm_confidence = reason_expiry_date(
+            logger.info(f"Fallback to AI Reasoning (Joint Type & Date Extraction).")
+            v_type, v_date, v_conf = reason_expiry_date(
                 document_type=doc_type,
-                detected_keywords=[],
                 candidate_dates=scoring.get("candidate_dates", []),
                 relevant_text_snippet=raw_text[:1500]
             )
-            final_date_str = llm_date
-            final_confidence = llm_confidence
+            doc_type = v_type # Use verified type
+            final_date_str = v_date
+            final_confidence = v_conf
             method = "ai-judgment"
             timers['llm'] = time.time() - s
 

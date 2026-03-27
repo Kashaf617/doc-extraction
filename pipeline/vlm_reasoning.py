@@ -43,44 +43,35 @@ def load_qwen_model() -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
 
 def reason_expiry_date(
     document_type: str,
-    detected_keywords: List[str],
     candidate_dates: List[str],
     relevant_text_snippet: str
-) -> Tuple[str, float]:
+) -> Tuple[str, str, float]:
     """
-    Uses LLM reasoning to determine the expiry date from context.
+    Uses LLM reasoning to determine BOTH document type and expiry date.
     
-    Args:
-        document_type: Classified type of document.
-        detected_keywords: Keywords found in OCR text.
-        candidate_dates: List of date strings found by regex.
-        relevant_text_snippet: Text segment containing potential dates.
-        
     Returns:
-        A tuple of (reasoned_date, confidence_score).
+        A tuple of (verified_type, verified_date, confidence_score).
     """
     try:
         tokenizer, model = load_qwen_model()
         
         system_prompt = (
             "You are a Senior Document AI Judge.\n"
-            "Task: Identify the 'Expiry Date' from the candidates based on document context.\n\n"
+            "Tasks:\n"
+            "1. IDENTIFY THE DOCUMENT TYPE (e.g. passport, id_card, driving_license, cnic, bill).\n"
+            "2. IDENTIFY THE EXPIRY DATE.\n\n"
             "STRICT RULES:\n"
-            "1. EXCLUDE: 'Date of Birth', 'Issue Date', 'Date of Issue'.\n"
-            "2. PRIORITY: The LATEST date that is explicitly labeled as 'Expiry', 'Until', 'Valid', or 'Due'.\n"
-            "3. JUDGMENT: If multiple future dates exist, choose the most logical expiration date.\n"
-            "4. OUTPUT: 'Final Date: <YYYY-MM-DD or NULL>'. No extra text."
+            "1. DATES: Exclude Date of Birth and Issue Date. Pick the logical expiration date.\n"
+            "2. TYPES: If 'Punjab' or 'Traffic Police' or 'License' is seen, it is a driving_license.\n"
+            "3. OUTPUT FORMAT: 'Final Type: <type> | Final Date: <YYYY-MM-DD or NULL>'. No extra text."
         )
 
-        kw_str = ", ".join(detected_keywords) if detected_keywords else "None"
         cand_str = ", ".join(candidate_dates) if candidate_dates else "None"
-        
         user_prompt = (
-            f"Document Type: {document_type}\n"
-            f"Keywords Found: [{kw_str}]\n"
+            f"Heuristic Type: {document_type}\n"
             f"Candidate Dates: [{cand_str}]\n"
             f"Context Snippet: {relevant_text_snippet}\n\n"
-            "Identify the Expiry Date."
+            "Identify the Final Type and Final Date."
         )
 
         messages = [
@@ -94,7 +85,7 @@ def reason_expiry_date(
         s = time.time()
         generated_ids = model.generate(
             model_inputs.input_ids,
-            max_new_tokens=40, # Reduced for speed
+            max_new_tokens=60, 
             temperature=0.1,
             do_sample=False
         )
@@ -106,13 +97,18 @@ def reason_expiry_date(
         full_response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
         logger.info(f"LLM Full Response:\n{full_response}")
         
-        # Robust Parsing: Scan for the date anywhere in the response
-        final_date = "NULL"
-        # Look for ISO, DD.MM.YYYY, DD-MM-YYYY, DD MMM YYYY patterns
+        # Robust Parsing
+        verified_type = document_type
+        if "Final Type:" in full_response:
+            v_type_raw = full_response.split("Final Type:")[-1].split("|")[0].strip().lower()
+            if v_type_raw in ["passport", "id_card", "driving_license", "cnic", "bill", "utility_bill"]:
+                verified_type = v_type_raw
+        
+        verified_date = "NULL"
         date_patterns = [
-            r'\d{4}[-/]\d{2}[-/]\d{2}',     # 2024-05-22
-            r'\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}', # 22.05.2024
-            r'\d{1,2}[\s.\-/][A-Z]{3,9}[\s.\-/]\d{2,4}'  # 22-MAY-2024
+            r'\d{4}[-/]\d{2}[-/]\d{2}',     
+            r'\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}', 
+            r'\d{1,2}[\s.\-/][A-Z]{3,9}[\s.\-/]\d{2,4}'  
         ]
         
         found_dates = []
@@ -121,17 +117,16 @@ def reason_expiry_date(
             if matches: found_dates.extend(matches)
         
         if found_dates:
-            # Use the first date found in the response
-            final_date = found_dates[0]
-            confidence = 0.95 if final_date in candidate_dates else 0.80
+            verified_date = found_dates[0]
+            confidence = 0.95 if verified_date in candidate_dates else 0.80
         elif "NULL" in full_response.upper():
-            final_date = "NULL"
+            verified_date = "NULL"
             confidence = 0.90
         else:
-            final_date = "NULL"
-            confidence = 0.0
+            verified_date = "NULL"
+            confidence = 0.4 # Uncertain
         
-        return final_date, confidence
+        return verified_type, verified_date, confidence
     except Exception as e:
-        logger.error(f"LLM reasoning failed: {e}")
-        return "NULL", 0.0
+        logger.error(f"LLM unified reasoning failed: {e}")
+        return document_type, "NULL", 0.0
