@@ -8,7 +8,7 @@ logger = logging.getLogger("DocumentAI.DateExtractor")
 # Negative keywords to filter out non-expiry dates
 ISSUE_KEYWORDS: List[str] = [
     "issue", "vydania", "narodenia", "born", "dob", "birth", "period", "stmt", "invoice", "entry",
-    "issued", "vydanie", "narodenie", "billing", "start date"
+    "issued", "vydanie", "narodenie", "billing", "start date", "renewal", "renewal date", "issue/renewal"
 ]
 
 # Standard date patterns for extraction
@@ -31,7 +31,8 @@ WEIGHTED_KEYWORDS: Dict[str, Any] = {
         "id-card": 1000, "identity card": 1000, "občiansky": 1000, "national id": 500, "citizen": 500
     },
     "driving_license": {
-        "driving license": 1000, "license": 500, "traffic police": 1000, "punjab": 500, "permit": 500
+        "driving license": 1000, "driving licence": 1000, "licence": 500, "license": 500, 
+        "traffic police": 1000, "punjab": 500, "permit": 500, "bangladesh": 1000, "brta": 1000, "motor": 500
     },
     "cnic": {
         "cnic": 1000, "nadra": 1000, "government of pakistan": 1000

@@ -68,4 +68,5 @@ def uploaded_file(filename):
 
 if __name__ == '__main__':
     # Use 0.0.0.0 to be accessible on local network if needed
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Disable reloader to prevent orphan processes in this environment
+    app.run(host='127.0.0.1', port=5000, debug=True, use_reloader=False)

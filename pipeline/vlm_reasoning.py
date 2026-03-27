@@ -58,12 +58,13 @@ def reason_expiry_date(
         system_prompt = (
             "You are a Senior Document AI Judge.\n"
             "Tasks:\n"
-            "1. IDENTIFY THE DOCUMENT TYPE (e.g. passport, id_card, driving_license, cnic, bill).\n"
+            "1. IDENTIFY THE DOCUMENT TYPE (passport, id_card, driving_license, cnic, bill).\n"
             "2. IDENTIFY THE EXPIRY DATE.\n\n"
             "STRICT RULES:\n"
-            "1. DATES: Exclude Date of Birth and Issue Date. Pick the logical expiration date.\n"
-            "2. TYPES: If 'Punjab' or 'Traffic Police' or 'License' is seen, it is a driving_license.\n"
-            "3. OUTPUT FORMAT: 'Final Type: <type> | Final Date: <YYYY-MM-DD or NULL>'. No extra text."
+            "1. EXPIRY: Priority: 'Validity', 'Expiry', 'Until', 'Valid'.\n"
+            "2. EXCLUDE: 'Issue', 'Renewal', 'Issue/Renewal', 'Date of Birth'.\n"
+            "3. TYPES: 'Licence' (UK spelling) or 'Motor' or 'BRTA' is a driving_license.\n"
+            "4. OUTPUT FORMAT: 'Final Type: <type> | Final Date: <YYYY-MM-DD or NULL>'."
         )
 
         cand_str = ", ".join(candidate_dates) if candidate_dates else "None"
