@@ -47,87 +47,40 @@ def reason_expiry_date(
     relevant_text_snippet: str
 ) -> Tuple[str, str, float]:
     """
-    Uses LLM reasoning to determine BOTH document type and expiry date.
-    
-    Returns:
-        A tuple of (verified_type, verified_date, confidence_score).
+    STRICT JSON REASONING for small models.
     """
     try:
         tokenizer, model = load_qwen_model()
         
         system_prompt = (
-            "You are a Senior Document AI Judge.\n"
-            "Tasks:\n"
-            "1. IDENTIFY THE DOCUMENT TYPE (passport, id_card, driving_license, cnic, bill).\n"
-            "2. IDENTIFY THE EXPIRY DATE.\n\n"
-            "STRICT RULES:\n"
-            "1. EXPIRY: Priority: 'Validity', 'Expiry', 'Until', 'Valid'.\n"
-            "2. EXCLUDE: 'Issue', 'Renewal', 'Issue/Renewal', 'Date of Birth'.\n"
-            "3. TYPES: 'Licence' (UK spelling) or 'Motor' or 'BRTA' is a driving_license.\n"
-            "4. OUTPUT FORMAT: 'Final Type: <type> | Final Date: <YYYY-MM-DD or NULL>'."
-        )
-
-        cand_str = ", ".join(candidate_dates) if candidate_dates else "None"
-        user_prompt = (
-            f"Heuristic Type: {document_type}\n"
-            f"Candidate Dates: [{cand_str}]\n"
-            f"Context Snippet: {relevant_text_snippet}\n\n"
-            "Identify the Final Type and Final Date."
-        )
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        
+            "You are a Senior Document AI.\n"
+            "Identify the Final Type and Expiry Date from the text.\n"
+            "RULES:\n"
         text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         model_inputs = tokenizer([text], return_tensors="pt").to(DEVICE)
 
-        s = time.time()
-        generated_ids = model.generate(
-            model_inputs.input_ids,
-            max_new_tokens=60, 
-            temperature=0.1,
-            do_sample=False
-        )
-        
-        generated_ids = [
-            output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-        ]
-        
+        generated_ids = model.generate(model_inputs.input_ids, max_new_tokens=100, temperature=0.01, do_sample=False)
+        generated_ids = [output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)]
         full_response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-        logger.info(f"LLM Full Response:\n{full_response}")
         
-        # Robust Parsing
-        verified_type = document_type
-        if "Final Type:" in full_response:
-            v_type_raw = full_response.split("Final Type:")[-1].split("|")[0].strip().lower()
-            if v_type_raw in ["passport", "id_card", "driving_license", "cnic", "bill", "utility_bill"]:
-                verified_type = v_type_raw
+        logger.info(f"LLM RAW: {full_response}")
         
-        verified_date = "NULL"
-        date_patterns = [
-            r'\d{4}[-/]\d{2}[-/]\d{2}',     
-            r'\d{1,2}[.\-/]\d{1,2}[.\-/]\d{2,4}', 
-            r'\d{1,2}[\s.\-/][A-Z]{3,9}[\s.\-/]\d{2,4}'  
-        ]
-        
-        found_dates = []
-        for p in date_patterns:
-            matches = re.findall(p, full_response, re.IGNORECASE)
-            if matches: found_dates.extend(matches)
-        
-        if found_dates:
-            verified_date = found_dates[0]
-            confidence = 0.95 if verified_date in candidate_dates else 0.80
-        elif "NULL" in full_response.upper():
-            verified_date = "NULL"
-            confidence = 0.90
-        else:
-            verified_date = "NULL"
-            confidence = 0.4 # Uncertain
-        
-        return verified_type, verified_date, confidence
+        # Robust JSON extraction
+        v_type, v_date = document_type, "NULL"
+        try:
+            # Find JSON block
+            match = re.search(r'\{.*\}', full_response, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+                v_type = data.get("type", document_type)
+                v_date = data.get("date", "NULL")
+        except:
+            # Fallback regex if JSON fails
+            if "driving" in full_response.lower() or "licence" in full_response.lower(): v_type = "driving_license"
+            date_match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', full_response)
+            if date_match: v_date = date_match.group()
+            
+        return str(v_type), str(v_date), 0.95 if v_date != "NULL" else 0.4
     except Exception as e:
-        logger.error(f"LLM unified reasoning failed: {e}")
+        logger.error(f"LLM failure: {e}")
         return document_type, "NULL", 0.0
